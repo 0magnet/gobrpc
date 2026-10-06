@@ -284,3 +284,68 @@ func TestClient_CloseUnblocksPending(t *testing.T) {
 		t.Fatalf("Close did not unblock the pending call")
 	}
 }
+
+// TestHandleCall_Concurrent checks that a HandleCall call blocked in its
+// method does not hold up a later call on the same connection.
+func TestHandleCall_Concurrent(t *testing.T) {
+	srvConn, cliConn := pipePair()
+
+	release := make(chan struct{})
+	srv := gobimpl.NewServer()
+	srv.HandleCall("Arith.Wait", func(dec *gob.Decoder) (gobimpl.CallFunc, error) {
+		var args Args
+		if err := dec.Decode(&args); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			<-release
+			return Reply{C: args.A}, nil
+		}, nil
+	})
+	srv.HandleCall("Arith.Release", func(dec *gob.Decoder) (gobimpl.CallFunc, error) {
+		var args Args
+		if err := dec.Decode(&args); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			close(release)
+			return Reply{}, nil
+		}, nil
+	})
+	srv.HandleCall("Arith.Bad", func(dec *gob.Decoder) (gobimpl.CallFunc, error) {
+		var args Args
+		_ = dec.Decode(&args) //nolint:errcheck // must still consume the arg body
+		return nil, errors.New("bad arg")
+	})
+	go srv.ServeConn(srvConn)
+
+	c := rpc.NewClient(cliConn)
+	defer c.Close() //nolint:errcheck
+
+	var waitReply Reply
+	waiting := c.Go("Arith.Wait", Args{A: 9}, &waitReply, nil)
+
+	done := make(chan error, 1)
+	go func() { done <- c.Call("Arith.Release", Args{}, &Reply{}) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Release was held up behind the blocked Wait call")
+	}
+
+	select {
+	case <-waiting.Done:
+		if waiting.Error != nil || waitReply.C != 9 {
+			t.Fatalf("Wait = %d, %v, want 9", waitReply.C, waiting.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait never returned")
+	}
+
+	if err := c.Call("Arith.Bad", Args{}, &Reply{}); err == nil || err.Error() != "bad arg" {
+		t.Fatalf("Bad err = %v, want \"bad arg\"", err)
+	}
+}
