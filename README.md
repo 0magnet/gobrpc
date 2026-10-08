@@ -32,7 +32,10 @@ go get github.com/0magnet/gobrpc
 
 ## Use
 
-Drop-in for the common subset — change the import and nothing else:
+Change the import and the client side is the same everywhere. The server side
+differs in how methods are registered, because TinyGo cannot run `net/rpc`'s
+reflection dispatch (it cannot enumerate or call methods). On native builds, use
+`Register`:
 
 ```go
 import "github.com/0magnet/gobrpc"
@@ -46,9 +49,30 @@ var reply int
 err := c.Call("Arith.Multiply", Args{7, 8}, &reply)
 ```
 
+Under TinyGo, register a reflection-free handler with `HandleFunc` instead. It
+decodes exactly one gob argument and returns the reply:
+
+```go
+srv := gobrpc.NewServer()
+srv.HandleFunc("Arith.Multiply", func(dec *gob.Decoder) (any, error) {
+	var a Args
+	if err := dec.Decode(&a); err != nil {
+		return nil, err
+	}
+	return a.A * a.B, nil
+})
+go srv.ServeConn(conn)
+```
+
+`HandleCall` is the same but takes a `DecodeFunc` that decodes the argument and
+returns a `CallFunc`; the call then runs in its own goroutine, so a blocking call
+does not hold up the connection. `HandlerFunc`, `CallFunc`, `DecodeFunc`,
+`HandleFunc` and `HandleCall` exist only in TinyGo builds. The wire format is
+unchanged, so a `HandleFunc` server still serves a stdlib `net/rpc` client.
+
 Exposed surface: `NewClient`, `NewServer`, `Dial`, `Client.Go/Call/Close`,
-`Server.Register/ServeConn`, the `Call` value and `ErrShutdown`. On native
-builds these are type aliases and vars pointing at `net/rpc`, so `gobrpc.Client`
+`Server.Register/RegisterName/ServeConn`, the `Call` value, `ServerError` and
+`ErrShutdown`. On native builds these are type aliases and vars pointing at `net/rpc`, so `gobrpc.Client`
 *is* `rpc.Client` and the two are interchangeable.
 
 Anything outside that subset — `HandleHTTP`, `ServeCodec`, custom codecs — is
@@ -59,7 +83,9 @@ deliberately absent, because it is what pulls `net/http` back in.
 `github.com/0magnet/gobrpc/gobimpl` is usable on its own if you want the
 reimplementation unconditionally. It imports only `encoding/gob`, `reflect`,
 `net`, `io`, `errors`, `strings` and `sync` — all TinyGo-portable — so it
-compiles in both worlds and is unit-tested on native in CI.
+compiles in both worlds. Its tests (`gobimpl/gobimpl_test.go`) run on native. It
+also has `Server.Accept(net.Listener)`, and its `Register` is reflection-based, so
+use `HandleFunc` under TinyGo.
 
 ## Notes
 
