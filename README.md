@@ -94,3 +94,35 @@ callers comparing on message text keep working.
 
 Extracted from [skywire](https://github.com/skycoin/skywire), where the router's
 RPC has to run both natively and inside a browser tab.
+
+## Dependency Graph
+
+Made with [goda](https://github.com/loov/goda):
+
+```
+go run github.com/loov/goda@latest graph github.com/0magnet/gobrpc/... | dot -Tsvg -o docs/gobrpc-goda-graph.svg
+```
+
+![Dependency Graph](docs/gobrpc-goda-graph.svg "github.com/0magnet/gobrpc Dependency Graph")
+
+## Lines of Code
+
+Made with [gocloc](https://github.com/hhatto/gocloc) (excludes `vendor/`, `node_modules/`, `.git/`):
+
+```
+gocloc --not-match-d='(vendor|node_modules|\.git)' .
+```
+
+```
+-------------------------------------------------------------------------------
+Language                     files          blank        comment           code
+-------------------------------------------------------------------------------
+Go                               4            125            170            684
+Makefile                         1             22             52            111
+YAML                             1              0              7             98
+Markdown                         1             30              0             97
+Bourne Shell                     1              8             17             31
+-------------------------------------------------------------------------------
+TOTAL                            8            185            246           1021
+-------------------------------------------------------------------------------
+```
